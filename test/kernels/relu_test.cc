@@ -1,8 +1,7 @@
 #include "../test.h"
-#include "../../aligned.h"
-#include "../../kernels.h"
+#include "../../intgemm/aligned.h"
+#include "../../intgemm/kernels.h"
 
-#include <stdint.h>
 #include <cstdint>
 #include <numeric>
 

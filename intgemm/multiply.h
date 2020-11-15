@@ -1,6 +1,6 @@
 #pragma once
 
-#include "intgemm_config.h"
+#include "intgemm/intgemm_config.h"
 #include "interleave.h"
 #include "intrinsics.h"
 #include "vec_traits.h"
@@ -47,16 +47,16 @@ INTGEMM_AVX512BW static inline __m256i PermuteSummer(__m512i pack0123, __m512i p
 // Quantize function used for SSSE3 and AVX2.
 // Separate function for thread to work around gcc 7 bug that doesn't imbue
 // target attributes across #pragma omp parallel.
-#define INTGEMM_QUANTIZE_THREAD(target, Register, name) \
+#define INTGEMM_QUANTIZE_THREAD(target) \
 target static void QuantizeThread(const float *input, int8_t *output, float quant_mult, std::size_t count) { \
-  name::QuantizeTile8 q(quant_mult); \
+  FRegister q = set1_ps<FRegister>(quant_mult); \
   INTGEMM_OMP_FOR \
   for (std::size_t i = 0; i < count; i += sizeof(Register)) { \
-    *reinterpret_cast<Register*>(output + i) = q.Consecutive(input + i); \
+    *reinterpret_cast<Register*>(output + i) = QuantizeTile8::Consecutive(q, input + i); \
   } \
 }
 
-#define INTGEMM_QUANTIZE(target, Register, name) \
+#define INTGEMM_QUANTIZE(target) \
 target static void Quantize(const float *const input, int8_t *const output, float quant_mult, Index size) { \
   assert(reinterpret_cast<uintptr_t>(input) % sizeof(Register) == 0); \
   assert(reinterpret_cast<uintptr_t>(output) % sizeof(Register) == 0); \
@@ -68,7 +68,7 @@ target static void Quantize(const float *const input, int8_t *const output, floa
   } \
   std::size_t overhang = size & (kBatch - 1); \
   if (!overhang) return; \
-  name::QuantizeTile8 q(quant_mult); \
+  FRegister q = set1_ps<FRegister>(quant_mult); \
   /* Each does size(Register) / 32 == kBatch / 4 floats at a time.
    * If we're allowed to read one of them, then we can read the whole register.  */ \
   const float *inputs[4]; \
@@ -80,7 +80,7 @@ target static void Quantize(const float *const input, int8_t *const output, floa
   for (; i < 4; ++i) { \
     inputs[i] = &input[fast_end]; \
   } \
-  Register result = q.Tile(inputs[0], inputs[1], inputs[2], inputs[3]); \
+  Register result = QuantizeTile8::Tile(q, inputs[0], inputs[1], inputs[2], inputs[3]); \
   std::memcpy(output + (size & ~(kBatch - 1)), &result, overhang); \
 }
 
@@ -159,7 +159,7 @@ template <typename Callback> target static void Multiply(const int16_t *A, const
   assert(B_cols % 8 == 0); \
   assert(reinterpret_cast<uintptr_t>(A) % sizeof(Register) == 0); \
   assert(reinterpret_cast<uintptr_t>(B) % sizeof(Register) == 0); \
-  const int simd_width = width / (sizeof(Register) / sizeof(int16_t)); \
+  const Index simd_width = width / (sizeof(Register) / sizeof(int16_t)); \
   auto callback_impl = callbacks::CallbackImpl<cpu_type, Callback>(callback); \
   INTGEMM_OMP_FOR \
   for (Index B0_colidx = 0; B0_colidx < B_cols; B0_colidx += 8) { \
@@ -169,7 +169,7 @@ template <typename Callback> target static void Multiply(const int16_t *A, const
       const Register *A_row = reinterpret_cast<const Register*>(A + A_rowidx * width); \
       /* These will be packed 32-bit integers containing sums for each row of B multiplied by the row of A. \
          Iterate over shared (inner) dimension.*/ \
-      int k = 0; \
+      Index k = 0; \
       Register a = *(A_row + k); \
       Register sum0 = madd_epi16(a, *(B0_col + k * 8)); \
       Register sum1 = madd_epi16(a, *(B0_col + k * 8 + 1)); \
@@ -216,7 +216,7 @@ template <typename Callback> target static void Multiply(const int16_t *A, const
   assert(width % (sizeof(Register) / sizeof(int8_t)) == 0); \
   assert(B_cols % 8 == 0); \
   assert(reinterpret_cast<uintptr_t>(B) % sizeof(Register) == 0); \
-  const int simd_width = width / (sizeof(Register) / sizeof(int8_t)); \
+  const Index simd_width = width / (sizeof(Register) / sizeof(int8_t)); \
   auto callback_impl = callbacks::CallbackImpl<cpu_type, Callback>(callback); \
   const Register a = set1_epi8<Register>(1); \
   INTGEMM_OMP_FOR \
@@ -225,7 +225,7 @@ template <typename Callback> target static void Multiply(const int16_t *A, const
     /*const Register *A_row = reinterpret_cast<const Register*>(A + A_rowidx * width);*/ \
     /* These will be packed 16-bit integers containing sums for each row of B multiplied by the row of A. \
        Iterate over shared (inner) dimension.*/ \
-    int k = 0; \
+    Index k = 0; \
     Register sum0 = maddubs_epi16(a, *(B0_col + k * 8)); \
     Register sum1 = maddubs_epi16(a, *(B0_col + k * 8 + 1)); \
     Register sum2 = maddubs_epi16(a, *(B0_col + k * 8 + 2)); \
@@ -291,7 +291,7 @@ template <typename Callback> target static void Multiply(const int16_t *A, const
   assert(B_cols % 8 == 0); \
   assert(reinterpret_cast<uintptr_t>(A) % sizeof(Register) == 0); \
   assert(reinterpret_cast<uintptr_t>(B) % sizeof(Register) == 0); \
-  const int simd_width = width / (sizeof(Register) / sizeof(int8_t)); \
+  const Index simd_width = width / (sizeof(Register) / sizeof(int8_t)); \
   auto callback_impl = callbacks::CallbackImpl<cpu_type, Callback>(callback); \
   INTGEMM_OMP_FOR \
   for (Index B0_colidx = 0; B0_colidx < B_cols; B0_colidx += 8) { \
@@ -301,7 +301,7 @@ template <typename Callback> target static void Multiply(const int16_t *A, const
       const Register *A_row = reinterpret_cast<const Register*>(A + A_rowidx * width); \
       /* These will be packed 16-bit integers containing sums for each row of B multiplied by the row of A. \
          Iterate over shared (inner) dimension.*/ \
-      int k = 0; \
+      Index k = 0; \
       Register a = *(A_row + k); \
       Register sum0 = maddubs_epi16(a, *(B0_col + k * 8)); \
       Register sum1 = maddubs_epi16(a, *(B0_col + k * 8 + 1)); \
@@ -538,7 +538,7 @@ INTGEMM_SSSE3 inline static void InnerINTGEMM_SSSE3(
   assert(B_cols % 8 == 0); \
   assert(reinterpret_cast<uintptr_t>(A) % sizeof(Register) == 0); \
   assert(reinterpret_cast<uintptr_t>(B) % sizeof(Register) == 0); \
-  const int simd_width = width / sizeof(Register); \
+  const Index simd_width = width / sizeof(Register); \
   auto callback_impl = callbacks::CallbackImpl<cpu_type, Callback>(callback); \
   INTGEMM_OMP_FOR \
   for (Index B0_colidx = 0; B0_colidx < B_cols; B0_colidx += 8) { \

@@ -1,9 +1,8 @@
 #include "../test.h"
-#include "../../aligned.h"
-#include "../../kernels.h"
+#include "../../intgemm/aligned.h"
+#include "../../intgemm/kernels.h"
 
 #include <cstdint>
-#include <stdint.h>
 #include <numeric>
 
 namespace intgemm {
