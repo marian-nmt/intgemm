@@ -7,7 +7,7 @@
 #include "types.h"
 
 namespace intgemm {
-namespace avx512vnni {
+namespace AVX512VNNI {
 
 // Workaround extra vmovdqa64 https://gcc.gnu.org/bugzilla/show_bug.cgi?id=94663
 INTGEMM_AVX512VNNI static inline void VNNI8(__m512i &c, __m512i a, __m512i b) {
@@ -18,7 +18,7 @@ INTGEMM_AVX512VNNI static inline void VNNI8(__m512i &c, __m512i a, __m512i b) {
 #endif
 }
 
-struct Kernels8 : public avx512bw::Kernels8 {
+struct Kernels8 : public AVX512BW::Kernels8 {
   template <typename Callback>
   INTGEMM_AVX512VNNI static void Multiply(const int8_t *A, const int8_t *B, Index A_rows, Index width, Index B_cols, Callback callback) {
     assert(width % sizeof(Register) == 0);
@@ -75,7 +75,7 @@ struct Kernels8 : public avx512bw::Kernels8 {
         Register pack0123 = Pack0123(sum0, sum1, sum2, sum3);
         Register pack4567 = Pack0123(sum4, sum5, sum6, sum7);
         auto total = PermuteSummer(pack0123, pack4567);
-        callback_impl(total, callbacks::OutputBufferInfo(A_rowidx, B0_colidx, A_rows, B_cols));
+        callback_impl.Run(total, callbacks::OutputBufferInfo(A_rowidx, B0_colidx, A_rows, B_cols));
       }
     }
   }
@@ -116,7 +116,7 @@ struct Kernels8 : public avx512bw::Kernels8 {
         Register pack0123 = Pack0123(sum0, sum1, sum2, sum3);
         Register pack4567 = Pack0123(sum4, sum5, sum6, sum7);
         auto total = PermuteSummer(pack0123, pack4567);
-        callback_impl(total, callbacks::OutputBufferInfo(A_rowidx, B0_colidx, A_rows, B_cols));
+        callback_impl.Run(total, callbacks::OutputBufferInfo(A_rowidx, B0_colidx, A_rows, B_cols));
       }
     }
   }
@@ -153,7 +153,7 @@ struct Kernels8 : public avx512bw::Kernels8 {
       Register pack0123 = Pack0123(sum0, sum1, sum2, sum3);
       Register pack4567 = Pack0123(sum4, sum5, sum6, sum7);
       auto total = PermuteSummer(pack0123, pack4567);
-      callback_impl(total, callbacks::OutputBufferInfo(0, B0_colidx, 1, B_cols));
+      callback_impl.Run(total, callbacks::OutputBufferInfo(0, B0_colidx, 1, B_cols));
     }
   }
 
@@ -162,7 +162,7 @@ struct Kernels8 : public avx512bw::Kernels8 {
   static const CPUType kUses = CPUType::AVX512VNNI;
 };
 
-} // namespace avx512vnni
+} // namespace AVX512VNNI
 } // namespace intgemm
 
 #endif

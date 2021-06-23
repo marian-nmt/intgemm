@@ -14,24 +14,43 @@ if(MSVC)
   add_compile_options(/W4 /WX)
 else()
   add_compile_options(-Wall -Wextra -pedantic -Werror -Wno-unknown-pragmas)
+  if (COMPILE_WASM)
+    # Disabling Pthreads + memory growth warning to be an error for WASM
+    # Pthreads + memory growth causes JS accessing the wasm memory to be slow
+    # https://github.com/WebAssembly/design/issues/1271
+    add_compile_options(-Wno-error=pthreads-mem-growth)
+  endif()
 endif()
+
+# Check if compiler supports AVX2 (this should only catch emscripten)
+try_compile(INTGEMM_COMPILER_SUPPORTS_AVX2
+  ${CMAKE_CURRENT_BINARY_DIR}/compile_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/compile_test/avx2.cc)
 
 # Check if compiler supports AVX512BW
 try_compile(INTGEMM_COMPILER_SUPPORTS_AVX512BW
   ${CMAKE_CURRENT_BINARY_DIR}/compile_tests
-  ${CMAKE_CURRENT_SOURCE_DIR}/compile_test_avx512bw.cc)
+  ${CMAKE_CURRENT_SOURCE_DIR}/compile_test/avx512bw.cc)
 
-if(NOT INTGEMM_COMPILER_SUPPORTS_AVX512BW)
-  message(WARNING "${Orange}Not building AVX512BW-based multiplication because your compiler is too old.\nFor details rerun cmake with --debug-trycompile then try to build in compile_tests/CMakeFiles/CMakeTmp.${ColourReset}")
-endif()
-
+# Check if the compiler supports AVX512VNNI
 try_compile(INTGEMM_COMPILER_SUPPORTS_AVX512VNNI
   ${CMAKE_CURRENT_BINARY_DIR}/compile_tests
-  ${CMAKE_CURRENT_SOURCE_DIR}/compile_test_avx512vnni.cc)
-#No compiler flags for this test; that's part of the test!
-if(NOT INTGEMM_COMPILER_SUPPORTS_AVX512VNNI)
-  message(WARNING "${Orange}Not building AVX512VNNI-based multiplication because your compiler is too old.\nFor details rerun cmake with --debug-trycompile then try to build in compile_tests/CMakeFiles/CMakeTmp.${ColourReset}")
+  ${CMAKE_CURRENT_SOURCE_DIR}/compile_test/avx512vnni.cc)
+
+if (NOT INTGEMM_COMPILER_SUPPORTS_AVX2 OR NOT INTGEMM_COMPILER_SUPPORTS_AVX512BW OR NOT INTGEMM_COMPILER_SUPPORTS_AVX512VNNI)
+  set(UNSUPPORTED "Your compiler is too old to support")
+  if (NOT INTGEMM_COMPILER_SUPPORTS_AVX2)
+    set(UNSUPPORTED "${UNSUPPORTED} AVX2")
+  endif()
+  if (NOT INTGEMM_COMPILER_SUPPORTS_AVX512BW)
+    set(UNSUPPORTED "${UNSUPPORTED} AVX512BW")
+  endif()
+  if (NOT INTGEMM_COMPILER_SUPPORTS_AVX512VNNI)
+    set(UNSUPPORTED "${UNSUPPORTED} AVX512VNNI")
+  endif()
+  message(WARNING "${Orange}${UNSUPPORTED}.  Multiplication will be slower on CPUs that support these instructions. For details rerun cmake with --debug-trycompile then try to build in compile_tests/CMakeFiles/CMakeTmp.${ColourReset}")
 endif()
+
 
 add_library(intgemm STATIC intgemm/intgemm.cc)
 
@@ -42,7 +61,7 @@ include_directories(${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(intgemm PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
 
 # This isn't necessary since intgemm uses entirely relative paths but source code depending on it may want to #include <intgemm/intgemm.h>
-target_include_directories(intgemm INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(intgemm INTERFACE .)
 
 option(USE_OPENMP "Use OpenMP" OFF)
 if (USE_OPENMP)
@@ -53,6 +72,16 @@ if (USE_OPENMP)
   endif()
   add_compile_options(${OpenMP_CXX_FLAGS})
   target_link_libraries(intgemm PUBLIC OpenMP::OpenMP_CXX)
+endif()
+
+if (COMPILE_WASM)
+    # A compile defintion to compile intgemm on WASM platform
+    target_compile_definitions(intgemm PUBLIC WASM)
+endif()
+
+option(WORMHOLE "Use WASM wormhole https://bugzilla.mozilla.org/show_bug.cgi?id=1672160" OFF)
+if (WORMHOLE)
+  target_compile_definitions(intgemm PUBLIC INTGEMM_WORMHOLE)
 endif()
 
 if(INTGEMM_DONT_BUILD_TESTS)
