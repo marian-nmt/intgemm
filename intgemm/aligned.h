@@ -2,7 +2,13 @@
 #include <cstdlib>
 #include <new>
 #ifdef _MSC_VER
+// Ensure _HAS_EXCEPTIONS is defined
+#include <vcruntime.h>
 #include <malloc.h>
+#endif
+
+#if !((defined(_MSC_VER) && !defined(__clang__)) ? (_HAS_EXCEPTIONS) : (__EXCEPTIONS))
+#include <cstdlib>
 #endif
 
 // Aligned simple vector.
@@ -17,10 +23,20 @@ template <class T> class AlignedVector {
       : size_(size) {
 #ifdef _MSC_VER
       mem_ = static_cast<T*>(_aligned_malloc(size * sizeof(T), alignment));
-      if (!mem_) throw std::bad_alloc();
-#else      
-      if (posix_memalign(reinterpret_cast<void **>(&mem_), alignment, size * sizeof(T))) {
+      if (!mem_) {
+#  if (defined(_MSC_VER) && !defined(__clang__)) ? (_HAS_EXCEPTIONS) : (__EXCEPTIONS)
         throw std::bad_alloc();
+#  else
+        std::abort();
+#  endif
+      }
+#else
+      if (posix_memalign(reinterpret_cast<void **>(&mem_), alignment, size * sizeof(T))) {
+#  if (defined(_MSC_VER) && !defined(__clang__)) ? (_HAS_EXCEPTIONS) : (__EXCEPTIONS)
+        throw std::bad_alloc();
+#  else
+        std::abort();
+#  endif
       }
 #endif
     }
@@ -31,6 +47,8 @@ template <class T> class AlignedVector {
     }
 
     AlignedVector &operator=(AlignedVector &&from) {
+      if (this == &from) return *this;
+      release();
       mem_ = from.mem_;
       size_ = from.size_;
       from.mem_ = nullptr;
@@ -41,13 +59,7 @@ template <class T> class AlignedVector {
     AlignedVector(const AlignedVector&) = delete;
     AlignedVector& operator=(const AlignedVector&) = delete;
 
-    ~AlignedVector() {
-#ifdef _MSC_VER
-      _aligned_free(mem_);
-#else
-      std::free(mem_);
-#endif
-    }
+    ~AlignedVector() { release(); }
 
     std::size_t size() const { return size_; }
 
@@ -65,6 +77,14 @@ template <class T> class AlignedVector {
   private:
     T *mem_;
     std::size_t size_;
+
+    void release() {
+#ifdef _MSC_VER
+      _aligned_free(mem_);
+#else
+      std::free(mem_);
+#endif
+    }
 };
 
 } // namespace intgemm

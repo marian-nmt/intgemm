@@ -1,9 +1,19 @@
+#if defined(WASM)
+// No header for CPUID since it's hard-coded.
+#elif defined(__INTEL_COMPILER)
+#include <immintrin.h>
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#else
+// Assume GCC and clang style.
+#include <cpuid.h>
+#endif
+
 #include "intgemm.h"
 #include "stats.h"
 
+#include <stdio.h>
 #include <stdlib.h>
-
-#include <iostream>
 
 namespace intgemm {
 
@@ -77,40 +87,58 @@ CPUType RealCPUID() {
 #endif
 }
 
+#ifdef INTGEMM_CPUID_ENVIRONMENT
 CPUType EnvironmentCPUID() {
-#if defined(_MSC_VER)
+#  if defined(_MSC_VER)
   char env_override[11];
   size_t len = 0;
   if (getenv_s(&len, env_override, sizeof(env_override), "INTGEMM_CPUID")) return CPUType::AVX512VNNI;
   if (!len) return CPUType::AVX512VNNI;
-#else
+#  else
   const char *env_override = getenv("INTGEMM_CPUID");
   if (!env_override) return CPUType::AVX512VNNI; /* This will be capped to actual ID */
-#endif
+#  endif
   if (!strcmp(env_override, "AVX512VNNI")) return CPUType::AVX512VNNI;
   if (!strcmp(env_override, "AVX512BW")) return CPUType::AVX512BW;
   if (!strcmp(env_override, "AVX2")) return CPUType::AVX2;
   if (!strcmp(env_override, "SSSE3")) return CPUType::SSSE3;
   if (!strcmp(env_override, "SSE2")) return CPUType::SSE2;
-  std::cerr << "Unrecognized INTGEMM_CPUID " << env_override << std::endl;
+  fprintf(stderr, "Ignoring unrecognized INTGEMM_CPUID %s\n", env_override);
   return CPUType::AVX512VNNI;
 }
+#endif
 
 } // namespace
 
 CPUType GetCPUID() {
-  static const CPUType kLocalCPU = std::min(RealCPUID(), EnvironmentCPUID());
+  static const CPUType kLocalCPU =
+#ifdef INTGEMM_CPUID_ENVIRONMENT
+    std::min(RealCPUID(), EnvironmentCPUID());
+#else
+    RealCPUID();
+#endif
   return kLocalCPU;
 }
 
 const CPUType kCPU = GetCPUID();
 
-float Unsupported_MaxAbsolute(const float * /*begin*/, const float * /*end*/) {
+void UnsupportedCPUError() {
+#if (defined(_MSC_VER) && !defined(__clang__)) ? (_HAS_EXCEPTIONS) : (__EXCEPTIONS)
   throw UnsupportedCPU();
+#else
+  fprintf(stderr, "intgemm does not support this CPU.\n");
+  abort();
+#endif
+}
+
+float Unsupported_MaxAbsolute(const float * /*begin*/, const float * /*end*/) {
+  UnsupportedCPUError();
+  return 0.0f;
 }
 
 MeanStd Unsupported_VectorMeanStd(const float * /*begin*/, const float * /*end*/, bool /*absolute*/) {
-  throw UnsupportedCPU();
+  UnsupportedCPUError();
+  return MeanStd();
 }
 
 void (*Int16::Quantize)(const float *input, int16_t *output, float quant_mult, Index size) = ChooseCPU(AVX512BW::Kernels16::Quantize, AVX512BW::Kernels16::Quantize, AVX2::Kernels16::Quantize, SSE2::Kernels16::Quantize, SSE2::Kernels16::Quantize, Unsupported_16bit::Quantize);
